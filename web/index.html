@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>machine chess</title>
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/pieces/bN.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <nav>
+    <a href="/" data-link data-nav="games">Games</a>
+    <a href="/new" data-link data-nav="new">New game</a>
+    <a href="/leaderboard" data-link data-nav="board">Leaderboard</a>
+  </nav>
+  <div id="sessions" class="sessions-chip" hidden></div>
+</header>
+<main id="app" tabindex="-1"></main>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

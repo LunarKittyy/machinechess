@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""chess - play a game on the machine-chess server. Run `chess help`."""
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+DEFAULT_URL = "http://127.0.0.1:8765"
+CONF = ".chess"
+
+HELP = """chess - play a game of chess against an opponent
+
+  chess wait                      block until it is your turn (~100 s max); exit 3 = timed out, run again
+  chess move <move> [--say TEXT] [--draw]
+                                  play a move, then wait for and print the opponent's reply
+  chess board                     current position (may be disabled)
+  chess history                   moves so far (may be disabled)
+  chess say TEXT                  message for the opponent, delivered with your next move
+  chess draw offer|accept|decline|claim
+  chess resign
+  chess join GAME [--color white|black] [--name NAME] [--url URL]
+                                  take an open seat (once per directory), then behaves like `chess wait`
+
+exit codes: 0 ok, 1 illegal move, 2 move not understood, 3 timed out, 4 game over, 5 disabled, 6 other
+add --json to any command for machine-readable output"""
+
+
+def find_conf(path=None):
+    path = path or os.environ.get("CHESS_CONF")
+    if path:
+        try:
+            return json.load(open(path))
+        except (OSError, ValueError):
+            return {}
+    d = os.getcwd()
+    while True:
+        p = os.path.join(d, CONF)
+        if os.path.isfile(p):
+            try:
+                return json.load(open(p))
+            except ValueError:
+                return {}
+        up = os.path.dirname(d)
+        if up == d:
+            return {}
+        d = up
+
+
+def call(conf, path, body=None, method="POST", timeout=130):
+    url = conf["url"].rstrip("/") + "/api/games/" + conf["game"] + "/" + path
+    data = json.dumps(body or {}).encode() if method == "POST" else None
+    req = urllib.request.Request(url, data=data, method=method, headers={"X-Seat-Token": conf.get("token", ""), "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return json.load(e)
+        except ValueError:
+            return {"code": 6, "text": f"server returned HTTP {e.code}"}
+    except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
+        return {"code": 6, "text": f"cannot reach the chess server at {conf['url']}: {getattr(e, 'reason', e)}"}
+
+
+def finish(res, as_json):
+    if as_json:
+        print(json.dumps(res))
+    else:
+        print(res.get("text", ""))
+    sys.exit(int(res.get("code", 6)))
+
+
+def main():
+    argv = sys.argv[1:]
+    as_json = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
+    conf_path = None
+    if "--conf" in argv:
+        i = argv.index("--conf")
+        conf_path = argv[i + 1] if i + 1 < len(argv) else None
+        del argv[i:i + 2]
+    if not argv or argv[0] in ("help", "-h", "--help"):
+        print(HELP)
+        return
+    cmd, rest = argv[0], argv[1:]
+    conf = find_conf(conf_path)
+    for k, e in (("url", "CHESS_URL"), ("game", "CHESS_GAME"), ("token", "CHESS_TOKEN")):
+        if os.environ.get(e):
+            conf[k] = os.environ[e]
+    conf.setdefault("url", DEFAULT_URL)
+    wait_s = float(os.environ.get("CHESS_WAIT_SECONDS") or conf.get("wait_s") or 100)
+
+    if cmd == "join":
+        p = argparse.ArgumentParser(prog="chess join")
+        p.add_argument("game")
+        p.add_argument("--color", choices=["white", "black"])
+        p.add_argument("--name", default="anonymous")
+        p.add_argument("--url", default=conf["url"])
+        a = p.parse_args(rest)
+        c = {"url": a.url, "game": a.game}
+        r = call(c, "join", {"color": a.color, "name": a.name}, timeout=15)
+        if "token" not in r:
+            finish({"code": 6, "text": r.get("text", "join failed")}, as_json)
+        c.update(token=r["token"], wait_s=r.get("wait_s", 100))
+        json.dump(c, open(CONF, "w"))
+        print(f"Joined game {a.game} as {r['color']}.", file=sys.stderr)
+        conf, cmd = c, "wait"
+    if "game" not in conf or "token" not in conf:
+        finish({"code": 6, "text": "No game here. Join one with `chess join GAME` or run from your game directory."}, as_json)
+
+    if cmd == "wait":
+        finish(call(conf, "wait", {"wait_s": wait_s}, timeout=wait_s + 30), as_json)
+    elif cmd == "move":
+        p = argparse.ArgumentParser(prog="chess move")
+        p.add_argument("move", nargs="+")
+        p.add_argument("--say")
+        p.add_argument("--draw", action="store_true")
+        p.add_argument("--no-wait", action="store_true")
+        a = p.parse_args(rest)
+        finish(call(conf, "move", {"move": " ".join(a.move), "say": a.say, "draw": a.draw, "no_wait": a.no_wait, "wait_s": wait_s}, timeout=wait_s + 30), as_json)
+    elif cmd in ("board", "status"):
+        finish(call(conf, "board"), as_json)
+    elif cmd == "history":
+        finish(call(conf, "history"), as_json)
+    elif cmd == "say":
+        finish(call(conf, "say", {"text": " ".join(rest)}), as_json)
+    elif cmd == "resign":
+        finish(call(conf, "resign"), as_json)
+    elif cmd == "draw":
+        if len(rest) != 1 or rest[0] not in ("offer", "accept", "decline", "claim"):
+            finish({"code": 6, "text": "usage: chess draw offer|accept|decline|claim"}, as_json)
+        finish(call(conf, "draw", {"action": rest[0]}), as_json)
+    else:
+        finish({"code": 6, "text": f"unknown command {cmd!r}. Run `chess help`."}, as_json)
+
+
+if __name__ == "__main__":
+    main()

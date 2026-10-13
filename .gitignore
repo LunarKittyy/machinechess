@@ -1,0 +1,8 @@
+.venv/
+data/
+runs/
+__pycache__/
+.claude/*
+!.claude/skills/
+PRODUCT.md
+DESIGN.md*
